@@ -1,9 +1,12 @@
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
+from typing import Optional, Union
+from datetime import datetime
 
 from app.models.user import User
+from app.models.charity_project import CharityProject
+from app.models.donation import Donation
 
 
 class CRUDBase:
@@ -70,3 +73,36 @@ class CRUDBase:
         await session.delete(db_obj)
         await session.commit()
         return db_obj
+
+    async def investition(
+            self,
+            session: AsyncSession,
+            new_obj: Union[CharityProject, Donation],
+            model: Union[CharityProject, Donation]
+    ):
+        objects = await session.execute(
+            select(model).where(
+                model.fully_invested is not False
+            )
+        )
+        objects = objects.scalars().all()
+        obj_money = new_obj.full_amount
+        for obj in objects:
+            need_money = obj.full_amount - obj.invested_amount
+            if obj_money <= need_money:
+                obj.invested_amount += obj_money
+                new_obj.invested_amount += obj_money
+                obj_money = 0
+            else:
+                obj.invested_amount = need_money
+                new_obj.invested_amount += need_money
+                obj_money -= need_money
+            if new_obj.full_amount == new_obj.invested_amount:
+                new_obj.fully_invested = True
+                new_obj.close_date = datetime.now()
+            if obj.full_amount == obj.invested_amount:
+                obj.fully_invested = True
+                obj.close_date = datetime.now()
+        await session.commit()
+        await session.refresh(new_obj)
+        return new_obj
